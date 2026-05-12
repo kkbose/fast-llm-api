@@ -12,7 +12,7 @@ from .constants import DEFAULT_AZURE_OPENAI_DEPLOYMENT
 from .encryptor import PipelineEncryptor
 from .exceptions import HarnessYamlValidationError
 from .prompt import STEP_SYSTEM_PROMPT, STEP_USER_PROMPT_TEMPLATE, SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
-from .validator import extract_yaml, validate_harness_step, validate_harness_yaml
+from .validator import extract_yaml, repair_llm_yaml, validate_harness_step, validate_harness_yaml
 
 
 def _invoke_llm_with_validation(
@@ -39,7 +39,7 @@ def _invoke_llm_with_validation(
             HumanMessage(content=user_message),
         ])
 
-        result = extract_yaml(response.content)
+        result = repair_llm_yaml(extract_yaml(response.content))
         ok, reason = validate_harness_yaml(result)
 
         if ok:
@@ -89,7 +89,7 @@ def _invoke_step_llm_with_validation(
             HumanMessage(content=user_message),
         ])
 
-        result = extract_yaml(response.content)
+        result = repair_llm_yaml(extract_yaml(response.content))
         ok, reason = validate_harness_step(result)
 
         if ok:

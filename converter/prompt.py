@@ -57,7 +57,7 @@ pipeline:
             steps:
               - step:
                   type: Run
-                  name: <Step name>
+                  name: "<Step name — double-quote if text contains ': ', e.g. Azure task titles>"
                   identifier: <Step_Identifier>
                   spec:
                     connectorRef: account.harnessImage
@@ -146,6 +146,26 @@ output — never paraphrase, omit, or replace a token.**
 8. Cron trigger → `source.type: Scheduled` with a `cron:` expression.
 9. No obvious Docker image → default to `ubuntu:latest`.
 10. Output ONLY valid YAML inside a ```yaml … ``` code fence.
+11. **YAML quoting (mandatory):** In YAML, an unquoted value that contains **a colon followed by a space** (`: `) is invalid — the parser treats the second `:` as starting a new key. Azure/Groovy-style titles often look like `Copy Files to: Target`. **You MUST wrap any such scalar in double quotes** and escape internal `"` as `\"`. Applies especially to `pipeline.name`, `stage.name`, `step.name`, `trigger.name`, `description`, `title`, and any one-line string that includes `: `. Correct: `name: "Copy Files to: [[SECURE_1]]"`. Wrong: `name: Copy Files to: [[SECURE_1]]`. Values like `docker:dind` (no space after `:`) stay unquoted.
+12. **Run step `command:` MUST be a literal block (fixes “expected <block end>, but found '<scalar>'”).** For **every** `type: Run` step (including inside CD `Deployment` stages), **all** shell lines (`npm …`, `docker …`, `mvn …`, `curl …`, `cd …`, etc.) belong **only** under `command: |-` (or `|`). Put `connectorRef`, `image`, `shell`, and optional `envVariables` **above** `command: |-`. Each script line is indented **deeper** than the word `command:` — never align script text with `connectorRef:` or `image:`. Use `command: |-` even for one line.
+    **STRICT — NEVER:** Paste script lines as YAML siblings next to `connectorRef:` or `image:` **before** `shell:` or **without** `command: |-`. A line starting with `npm`, `docker`, `mvn`, `pip`, `./`, `export`, `cd`, `curl`, `git`, `anypoint`, `@latest`, etc. must **never** appear at the same indentation column as `connectorRef:` — parser errors like ``expected <block end>, but found '<scalar>'`` will occur.
+    **Preferred Run step.spec field order:** `connectorRef` → `image` → `shell` → `command: |-` → optional `envVariables` / `privileged`. **`command: |-` always precedes any loose shell content.** **Wrong** (invalid YAML — bare `npm` looks like a sibling key under `spec:`):
+    ```yaml
+    spec:
+      connectorRef: account.harnessImage
+      image: ubuntu:latest
+      shell: Bash
+      npm install -g anypoint-cli@latest
+    ```
+    **Right:**
+    ```yaml
+    spec:
+      connectorRef: account.harnessImage
+      image: ubuntu:latest
+      shell: Bash
+      command: |-
+        npm install -g anypoint-cli@latest
+    ```
 
 ## Source-format mapping hints
 
@@ -154,7 +174,7 @@ output — never paraphrase, omit, or replace a token.**
 - `agent { docker { image 'foo' } }` → `image:` on the Run step.
 - `environment { KEY = 'val' }` → `envVariables:` on the step.
 - `withCredentials([...])` → `<+secrets.getValue("name")>`.
-- `sh` / `bat` / `powershell` → `command:`; set `shell: Bash` or `shell: Powershell`.
+- `sh` / `bat` / `powershell` → `command: |-` with script indented under it; set `shell: Bash` or `shell: Powershell`.
 - `post { always/success/failure { ... } }` → `failureStrategies:` block.
 - `parameters { ... }` → pipeline-level `variables:`.
 - `parallel { stage('A') {...} stage('B') {...} }` → `stepGroup` with `parallel: true`.
@@ -172,16 +192,17 @@ output — never paraphrase, omit, or replace a token.**
 - `artifacts:` / `cache:` → add a comment noting manual Harness configuration is needed.
 
 ### Azure DevOps YAML (build pipeline)
+- Task **display names** frequently contain ``": "`` (e.g. ``Copy Files to: $(TargetFolder)``). In Harness YAML always emit those as **quoted** `name:` / stage titles per rule 11.
 - `pool.vmImage` → `platform.os: Linux` (or Windows if windows-latest).
-- `task: Bash@3` / `task: PowerShell@2` → Run step; extract `inputs.script` as `command:`.
-- `task: Maven@4` → Run step with `image: maven`, goals as `command:`.
+- `task: Bash@3` / `task: PowerShell@2` → Run step; extract `inputs.script` into `command: |-` (indented block), never as loose lines under `spec:`.
+- `task: Maven@4` → Run step with `image: maven`, goals inside `command: |-`.
 - `task: Docker@*` (build) → Run step with `image: docker:dind`, `privileged: true`.
 - `task: PublishBuildArtifacts@1` → note artifact path in a comment or template step.
 - `variables:` block → pipeline-level `variables:` or step `envVariables:`.
 
 ### Azure DevOps Classic Release Pipeline (JSON)
 - `environments[].name` → one Harness `Deployment` stage per environment.
-- `environments[].deployPhases[].workflowTasks[]` → Run steps; use `inputs.script` as `command:`.
+- `environments[].deployPhases[].workflowTasks[]` → `type: Run` steps; put **every** line of `inputs.script` inside `spec.command: |-` with deeper indentation (rule 12). Classic JSON often expands to long `npm`/`mvn`/`anypoint-cli` commands — still one block under `command: |-`.
 - `environments[].variables` → step `envVariables:` or pipeline `variables:`.
 - `artifacts[].definitionReference.definition.name` → reference as a comment or download step.
 - `preDeployApprovals` / `postDeployApprovals` → add a comment noting manual approval stage needed.
@@ -213,6 +234,10 @@ replicate the exact same structure, field names, and conventions shown there.
   template reference — never combine multiple source tasks into one step.
 - **Preserve all values.** Every variable name, image tag, path, flag, and argument from the
   source must appear unchanged in the output (or as a `[[SECURE_N]]` token if it was masked).
+- **Quoted names when text contains `: `.** Before finishing, scan every `name:` (and similar
+  scalars) — if the value text includes a colon followed by a space, it must be double-quoted or the YAML will not parse.
+- **Run steps:** Every `npm`/`docker`/shell line must appear **inside** `command: |-`, indented past `command:` — never at the same indent as `connectorRef`/`image`. Do **not** output scripts between `connectorRef`/`image` and `shell:` without `command: |-`.
+- **Forbidden:** Any executable/script line at the same YAML indent as `connectorRef:` or `image:` (see rule 12 STRICT).
 - **Output nothing except the YAML.** No explanation, no commentary, no markdown outside the
   single ```yaml … ``` code fence.
 
@@ -256,7 +281,7 @@ Produce ONLY a single Harness step YAML snippet in this exact shape:
 ```yaml
 step:
   type: Run
-  name: <Human readable name>
+  name: "<Human readable name — use double quotes if it contains ': ', e.g. Copy Files to: dest>"
   identifier: <Name_With_Underscores>
   spec:
     connectorRef: <+input>
@@ -268,7 +293,7 @@ step:
 
 ## Rules
 
-1. `name` — use `displayName` from the input; if empty derive from `taskName`.
+1. `name` — use `displayName` from the input; if empty derive from `taskName`. If the text contains **`: `** (colon + space), wrap the whole value in double quotes (escape `"` inside as `\"`).
 2. `identifier` — copy `name`, replace spaces/hyphens/dots with underscores, no other special chars.
 3. `connectorRef` and `image` must be `<+input>` unless the step explicitly names a Docker image.
 4. For Docker build/push tasks (`Docker@0`, `docker build`, `docker push`) → set `image: docker:dind` and add `privileged: true` under `spec`.
@@ -277,8 +302,10 @@ step:
 7. Secrets / credentials → use `<+secrets.getValue("name")>`.
 8. Copy every `[[SECURE_N]]` token verbatim — do NOT replace or omit tokens.
 9. `continueOnError: true` in `originalStep` → append `|| true` to the command.
-10. Produce ONLY valid YAML — no prose, no explanations outside YAML comments.
-11. Output the YAML inside a ```yaml … ``` code fence.
+10. **`command:` must always use `command: |-`** with every shell line indented **under** it — never put `npm`, `docker`, `mvn`, etc. at the same indentation as `connectorRef`/`image`, **including between `image:` and `shell:`** (always insert `command: |-` then scripts — strict sibling scripts cause “expected <block end>, but found '<scalar>'”).
+11. Produce ONLY valid YAML — no prose, no explanations outside YAML comments.
+12. Output the YAML inside a ```yaml … ``` code fence.
+13. Never emit `name: Foo: bar` unquoted — use `name: "Foo: bar"` (same for any `[[SECURE_N]]` in that title).
 """
 
 STEP_USER_PROMPT_TEMPLATE = """\
