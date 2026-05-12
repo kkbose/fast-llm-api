@@ -1,0 +1,9 @@
+langchain-openai
+langchain-core
+pyyaml
+cryptography
+loguru
+python-dotenv
+fastapi
+uvicorn[standard]
+python-multipart

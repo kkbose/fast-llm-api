@@ -1,0 +1,90 @@
+pipeline:
+  name: my-mulesoft-api-dev
+  identifier: my_mulesoft_api_dev
+  projectIdentifier: Build_Deploy
+  orgIdentifier: Mulesoft
+  tags: {}
+  properties:
+    ci:
+      codebase:
+        connectorRef: account.github_connector
+        repoName: my-mulesoft-api
+        build: <+input>
+        sparseCheckout: []
+  stages:
+    - stage:
+        name: my-mulesoft-api-dev
+        identifier: my_mulesoft_api_dev
+        description: ""
+        type: CI
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: true
+            override: true
+            paths: []
+          infrastructure:
+            type: KubernetesDirect
+            spec:
+              connectorRef: org.mulesoft_build_cluster
+              namespace: mulesoft-harness-build
+              automountServiceAccountToken: true
+              nodeSelector: {}
+              os: Linux
+          execution:
+            steps:
+              - step:
+                  name: Download_Artifacts
+                  identifier: Download_Artifacts
+                  template:
+                    templateRef: account.Download_Artifacts
+                    versionLabel: "1.0"
+                    templateInputs:
+                      type: Run
+                      spec:
+                        envVariables:
+                          gar_repository: harness-mulesoft-artifacts-feed
+                          package: mulesoft_common_libraries
+                          artifact_version: "2.0"
+              - stepGroup:
+                  name: Dev_Build
+                  identifier: Dev_Build
+                  template:
+                    templateRef: mulesoft_build_template
+                    versionLabel: "1.0"
+              - step:
+                  type: Run
+                  name: CopyFiles_To_SourceDir
+                  identifier: CopyFiles_To_SourceDir
+                  spec:
+                    connectorRef: account.DockerHub
+                    image: maven
+                    shell: Bash
+                    command: |-
+                      #!/bin/sh
+                      apt-get update && apt-get install -y rsync
+                      BASE_NAME=<+stage.name>
+                      SRC_FOLDER="${BASE_NAME%-*}"
+                      rsync -av \
+                        --exclude="META-INF/mule-src/$SRC_FOLDER/build_artifact" \
+                        --exclude="META-INF/mule-src/$SRC_FOLDER/exchange-docs" \
+                        --exclude="META-INF/mule-src/$SRC_FOLDER/repo/com" \
+                        --exclude="META-INF/mule-src/$SRC_FOLDER/repo/org" \
+                        --include='*/' --include='**/*.*' --exclude='*' \
+                        target/ /harness/build_artifact/target/
+              - step:
+                  name: Push_To_GAR
+                  identifier: Push_To_GAR
+                  template:
+                    templateRef: account.Publish_Pipeline_Artifacts
+                    versionLabel: "1.0"
+                    templateInputs:
+                      type: Run
+                      spec:
+                        envVariables:
+                          package: <+stage.name>
+                          artifact_version: <+pipeline.properties.ci.codebase.build.spec.branch>-<+<+currentDate()>.toString().replace("-", "")>-<+pipeline.sequenceId>
+                          gar_repository: harness-mulesoft-my-mulesoft-api-dev
+                          artifact_directory_path: /harness/build_artifact/
+          buildIntelligence:
+            enabled: false

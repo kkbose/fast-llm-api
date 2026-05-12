@@ -1,0 +1,70 @@
+trigger:
+  branches:
+    include:
+      - poc-dev
+
+resources:
+  repositories:
+    - repository: self
+      type: git
+      ref: refs/heads/poc-dev
+
+jobs:
+  - job: ContainerServiceDeployment
+    displayName: Container Service Deployment
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - checkout: self
+        clean: true
+      - task: DownloadSecureFile@1
+        name: platform_key
+        displayName: Download secure file
+        inputs:
+          secureFile: platform-service-account.json
+      - task: contoso.platform-sdk-tasks.platform-runner.PlatformRunner@0
+        displayName: Activate Platform Account
+        inputs:
+          command: auth activate-service-account --key-file $(platform_key.secureFilePath)
+      - task: contoso.platform-sdk-tasks.platform-runner.PlatformRunner@0
+        displayName: Create Container Registry
+        continueOnError: true
+        inputs:
+          command: artifacts repositories create poc-container-repo
+          arguments: --repository-format=Docker --location=central-region --project demo-platform-project
+      - task: Docker@0
+        displayName: Build Container Image
+        inputs:
+          containerregistrytype: Container Registry
+          dockerRegistryEndpoint: sample-container-service-connection
+          dockerFile: app/Dockerfile
+          imageName: central-region-docker.pkg.dev/demo-platform-project/poc-container-repo/sample-service
+      - task: Docker@0
+        displayName: Push Container Image
+        inputs:
+          containerregistrytype: Container Registry
+          dockerRegistryEndpoint: sample-container-service-connection
+          action: Push an image
+          imageName: central-region-docker.pkg.dev/demo-platform-project/poc-container-repo/sample-service
+      - task: contoso.platform-sdk-tasks.platform-runner.PlatformRunner@0
+        displayName: Deploy Container Service
+        inputs:
+          command: run deploy poc-container-service
+          arguments: >
+            --image=central-region-docker.pkg.dev/demo-platform-project/poc-container-repo/sample-service
+            --platform=managed --region=central-region --allow-unauthenticated
+            --memory=512Mi --cpu=1 --project=demo-platform-project
+      - task: contoso.platform-sdk-tasks.platform-runner.PlatformRunner@0
+        displayName: Remove Existing Scheduler
+        continueOnError: true
+        inputs:
+          command: scheduler jobs delete poc-container-trigger
+          arguments: --project demo-platform-project --location central-region
+      - task: contoso.platform-sdk-tasks.platform-runner.PlatformRunner@0
+        displayName: Configure Scheduler Trigger
+        inputs:
+          command: scheduler jobs create http poc-container-trigger
+          arguments: >
+            --location=central-region --schedule="0 */4 * * *"
+            --uri=https://sample-container-service.example.run.app
+            --http-method=GET --project=demo-platform-project

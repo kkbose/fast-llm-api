@@ -1,0 +1,126 @@
+pipeline:
+  name: Container Service Deployment
+  identifier: Container_Service_Deployment
+  projectIdentifier: default
+  orgIdentifier: default
+  tags: {}
+  stages:
+    - stage:
+        name: Deploy
+        identifier: Deploy
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Activate Platform Account
+                  identifier: Activate_Platform_Account
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: google/cloud-sdk:latest
+                    shell: Bash
+                    command: |-
+                      platform auth activate-service-account --key-file <+secrets.getValue("platform-service-account-json")>
+              - step:
+                  type: Run
+                  name: Create Container Registry
+                  identifier: Create_Container_Registry
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: google/cloud-sdk:latest
+                    shell: Bash
+                    command: |-
+                      platform artifacts repositories create poc-container-repo \
+                        --repository-format=Docker --location=central-region --project demo-platform-project || true
+              - step:
+                  type: Run
+                  name: Build Container Image
+                  identifier: Build_Container_Image
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: docker:dind
+                    shell: Bash
+                    privileged: true
+                    command: |-
+                      docker build \
+                        -t central-region-docker.pkg.dev/demo-platform-project/poc-container-repo/sample-service \
+                        -f app/Dockerfile .
+              - step:
+                  type: Run
+                  name: Push Container Image
+                  identifier: Push_Container_Image
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: docker:dind
+                    shell: Bash
+                    privileged: true
+                    command: |-
+                      docker push \
+                        central-region-docker.pkg.dev/demo-platform-project/poc-container-repo/sample-service
+              - step:
+                  type: Run
+                  name: Deploy Container Service
+                  identifier: Deploy_Container_Service
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: google/cloud-sdk:latest
+                    shell: Bash
+                    command: |-
+                      platform run deploy poc-container-service \
+                        --image=central-region-docker.pkg.dev/demo-platform-project/poc-container-repo/sample-service \
+                        --platform=managed \
+                        --region=central-region \
+                        --allow-unauthenticated \
+                        --memory=512Mi \
+                        --cpu=1 \
+                        --project=demo-platform-project
+              - step:
+                  type: Run
+                  name: Remove Existing Scheduler
+                  identifier: Remove_Existing_Scheduler
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: google/cloud-sdk:latest
+                    shell: Bash
+                    command: |-
+                      platform scheduler jobs delete poc-container-trigger \
+                        --project demo-platform-project --location central-region || true
+              - step:
+                  type: Run
+                  name: Configure Scheduler Trigger
+                  identifier: Configure_Scheduler_Trigger
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: google/cloud-sdk:latest
+                    shell: Bash
+                    command: |-
+                      platform scheduler jobs create http poc-container-trigger \
+                        --location=central-region \
+                        --schedule="0 */4 * * *" \
+                        --uri=https://sample-container-service.example.run.app \
+                        --http-method=GET \
+                        --project=demo-platform-project
+
+trigger:
+  name: Push to poc-dev
+  identifier: Push_to_poc_dev
+  enabled: true
+  pipelineIdentifier: Container_Service_Deployment
+  source:
+    type: Webhook
+    spec:
+      type: AzureRepo
+      spec:
+        event: Push
+        actions: []
+        jexlCondition: ""
+        branchNames:
+          - poc-dev

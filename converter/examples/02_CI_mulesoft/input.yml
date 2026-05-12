@@ -1,0 +1,103 @@
+name: $(Build.SourceBranchName)_$(date:yyyyMMdd)$(rev:.r)
+resources:
+  repositories:
+  - repository: self
+    type: git
+    ref: refs/heads/develop
+jobs:
+- job: Job_1
+  displayName: Mulesoft-Build
+  pool:
+    vmImage: macos-latest
+  steps:
+  - checkout: self
+    clean: true
+    fetchTags: false
+    persistCredentials: True
+  - task: DownloadPackage@1
+    displayName: Download parent pom xml
+    inputs:
+      packageType: upack
+      feed: <uuid-1>/<uuid-2>
+      view: <uuid-3>
+      definition: <uuid-4>
+      version: 0.0.1
+      downloadPath: $(build.sourcesdirectory)
+  - task: DownloadPackage@1
+    displayName: mule-custom-logger-1.3.7.pom
+    inputs:
+      packageType: upack
+      feed: <uuid-1>/<uuid-2>
+      view: <uuid-3>
+      definition: <uuid-5>
+      version: 0.0.1
+      downloadPath: $(build.sourcesdirectory)
+  - task: DownloadPackage@1
+    displayName: mule-custom-logger-1.3.7
+    inputs:
+      packageType: upack
+      feed: <uuid-1>/<uuid-2>
+      view: <uuid-3>
+      definition: <uuid-6>
+      version: 0.0.1
+      downloadPath: $(build.sourcesdirectory)
+  - task: DownloadPackage@1
+    displayName: Download myorg-error-handler-1.1.0 jar
+    inputs:
+      packageType: maven
+      feed: <uuid-1>/<uuid-2>
+      view: <uuid-3>
+      definition: <uuid-7>
+      version: 1.1.0
+      downloadPath: $(build.sourcesdirectory)
+  - task: Bash@3
+    displayName: Apache-Maven-Plugin-3.9.14
+    inputs:
+      targetType: inline
+      script: |
+        curl -O https://downloads.apache.org/maven/maven-3/3.9.14/binaries/apache-maven-3.9.14-bin.zip
+        unzip apache-maven-3.9.14-bin.zip
+        export M2_HOME="$(build.sourcesdirectory)/apache-maven-3.9.14"
+        export M2=$M2_HOME/bin
+        export PATH=$M2:$PATH
+        mvn -version
+  - task: Bash@3
+    displayName: BuildScript
+    inputs:
+      targetType: inline
+      script: |
+        cd $(build.sourcesdirectory)
+        mkdir repo
+        cd repo
+        mkdir <uuid-8>
+        cd <uuid-8>
+        mkdir mule-custom-logger
+        mkdir myorg_error_handler
+        cd $(build.sourcesdirectory)/repo/<uuid-8>/mule-custom-logger/
+        mkdir 1.3.7
+        cp $(build.sourcesdirectory)/mule-custom-logger-1.3.7-mule-plugin.jar \
+          $(build.sourcesdirectory)/repo/<uuid-8>/mule-custom-logger/1.3.7/
+        cd $(build.sourcesdirectory)/repo/<uuid-8>/myorg_error_handler/
+        mkdir 1.1.0
+        cp $(build.sourcesdirectory)/myorg_error_handler-1.1.0-mule-plugin.jar \
+          $(build.sourcesdirectory)/repo/<uuid-8>/myorg_error_handler/1.1.0/
+        cp myorg_error_handler-1.1.0.pom \
+          $(build.sourcesdirectory)/repo/<uuid-8>/myorg_error_handler/1.1.0/
+        cp mule-custom-logger-1.3.7.pom \
+          $(build.sourcesdirectory)/repo/<uuid-8>/mule-custom-logger/1.3.7/
+  - task: Maven@4
+    displayName: Maven build
+    inputs:
+      goals: clean package -DskipMunitTests
+      mavenVersionSelection: Path
+      mavenPath: $(build.sourcesdirectory)/apache-maven-3.9.14
+  - task: CopyFiles@2
+    displayName: 'Copy Files to: $(Build.SourcesDirectory)'
+    inputs:
+      SourceFolder: $(System.ArtifactsDirectory)
+      Contents: '**/*.*'
+      TargetFolder: $(Build.SourcesDirectory)
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: drop'
+    inputs:
+      PathtoPublish: $(Build.SourcesDirectory)/target

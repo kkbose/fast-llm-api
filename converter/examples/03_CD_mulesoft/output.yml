@@ -1,0 +1,177 @@
+pipeline:
+  name: my-mulesoft-api-release-dev
+  identifier: my_mulesoft_api_release_dev
+  projectIdentifier: Build_Deploy
+  orgIdentifier: Mulesoft
+  tags: {}
+  properties:
+    ci:
+      codebase:
+        connectorRef: account.github_connector
+        repoName: my-mulesoft-api
+        build: <+input>
+        sparseCheckout: []
+  stages:
+    - stage:
+        name: Dev_Deploy
+        identifier: Dev_Deploy
+        description: ""
+        type: Deployment
+        spec:
+          deploymentType: CustomDeployment
+          customDeploymentRef:
+            templateRef: mulesoft_deploy_template
+            versionLabel: "1.0"
+          service:
+            serviceRef: mulesoft
+          execution:
+            steps:
+              - step:
+                  name: Fetch Instances
+                  identifier: fetchInstances
+                  type: FetchInstanceScript
+                  timeout: 10m
+                  spec: {}
+              - stepGroup:
+                  name: Dev_Deployment
+                  identifier: Dev_Deployment
+                  steps:
+                    - step:
+                        name: Download_Artifacts
+                        identifier: Download_Artifacts
+                        template:
+                          templateRef: account.Download_Artifacts
+                          versionLabel: "1.0"
+                          templateInputs:
+                            type: Run
+                            spec:
+                              envVariables:
+                                gar_repository: harness-mulesoft-my-mulesoft-api-dev
+                                package: my-mulesoft-api-dev
+                                artifact_version: dev-20260101-1
+                    - step:
+                        type: Run
+                        name: Dev_Deploy
+                        identifier: Dev_Deploy
+                        spec:
+                          connectorRef: account.DockerHub
+                          image: node:20
+                          shell: Bash
+                          command: |-
+                            #!/bin/bash
+                            set -x
+                            apt-get update && apt-get install -y jq
+                            npm install -g anypoint-cli@latest
+
+                            export ANYPOINT_ORG="<+pipeline.variables.DEV_ORG_ID>"
+                            export ANYPOINT_ENV="<+pipeline.variables.DEV_ENV_ID>"
+
+                            DEV_CLIENT_ID="<+pipeline.variables.DEV_CLIENT_ID>"
+                            DEV_CLIENT_SECRET="<+pipeline.variables.DEV_CLIENT_SECRET>"
+
+                            response=$(curl -s -H "Content-Type: application/json" \
+                              -X POST \
+                              -d "{\"client_id\":\"$DEV_CLIENT_ID\",\"client_secret\":\"$DEV_CLIENT_SECRET\",\"grant_type\":\"client_credentials\"}" \
+                              -w "%{http_code}" \
+                              https://anypoint.mulesoft.com/accounts/api/v2/oauth2/token)
+
+                            body="${response::-3}"
+                            bearer_token=$(echo "$body" | jq -r '.access_token')
+
+                            ARTIFACT_PATH="<+pipeline.variables.PACKAGE>"
+                            filename=$(find "$ARTIFACT_PATH/target/" -type f -maxdepth 1)
+
+                            DEV_APP_NAME="<+pipeline.variables.DEV_APP_NAME>"
+                            if anypoint-cli runtime-mgr cloudhub-application describe --bearer "$bearer_token" "$DEV_APP_NAME"; then
+                              anypoint-cli runtime-mgr cloudhub-application modify --bearer "$bearer_token" \
+                                --runtime "<+pipeline.variables.DEV_RUNTIME_NEW>" \
+                                --workers "<+pipeline.variables.DEV_WORKERS>" \
+                                --workerSize "<+pipeline.variables.DEV_WORKER_SIZE>" \
+                                --region "<+pipeline.variables.DEV_REGION>" \
+                                "$DEV_APP_NAME" "/harness/$filename"
+                            else
+                              anypoint-cli runtime-mgr cloudhub-application deploy --bearer "$bearer_token" \
+                                --runtime "<+pipeline.variables.DEV_RUNTIME_NEW>" \
+                                --workers "<+pipeline.variables.DEV_WORKERS>" \
+                                --workerSize "<+pipeline.variables.DEV_WORKER_SIZE>" \
+                                --region "<+pipeline.variables.DEV_REGION>" \
+                                "$DEV_APP_NAME" "/harness/$filename"
+                            fi
+                          envVariables:
+                            ENCRYPT_SECRET_KEY: <+secrets.getValue("DEV_ENCRYPT_SECRET_KEY")>
+                            ANYPOINT_PLATFORM_CLIENT_ID: <+secrets.getValue("DEV_ANYPOINT_PLATFORM_CLIENT_ID")>
+                            ANYPOINT_PLATFORM_CLIENT_SECRET: <+secrets.getValue("DEV_ANYPOINT_PLATFORM_CLIENT_SECRET")>
+                            NEWRELIC_LICENSE_KEY: <+secrets.getValue("DEV_NEWRELIC_LICENSE_KEY")>
+                  stepGroupInfra:
+                    type: KubernetesDirect
+                    spec:
+                      connectorRef: org.mulesoft_nprod_cluster
+            rollbackSteps: []
+          environment:
+            environmentRef: dev_env
+            deployToAll: false
+            infrastructureDefinitions:
+              - identifier: mulesoft_infra_dev
+        tags: {}
+        failureStrategies:
+          - onFailure:
+              errors:
+                - AllErrors
+              action:
+                type: StageRollback
+  variables:
+    - name: DEV_ORG_ID
+      type: String
+      description: ""
+      required: false
+      value: <+input>
+    - name: DEV_ENV_ID
+      type: String
+      description: ""
+      required: false
+      value: <+input>
+    - name: DEV_ENVIRONMENT
+      type: String
+      description: ""
+      required: false
+      value: <+input>
+    - name: DEV_APP_NAME
+      type: String
+      description: ""
+      required: false
+      value: <+input>
+    - name: DEV_RUNTIME_NEW
+      type: String
+      description: ""
+      required: false
+      value: <+input>
+    - name: DEV_WORKERS
+      type: String
+      description: ""
+      required: false
+      value: <+input>
+    - name: DEV_WORKER_SIZE
+      type: String
+      description: ""
+      required: false
+      value: <+input>
+    - name: DEV_REGION
+      type: String
+      description: ""
+      required: false
+      value: <+input>
+    - name: PACKAGE
+      type: String
+      description: ""
+      required: false
+      value: <+input>
+    - name: DEV_CLIENT_ID
+      type: Secret
+      description: ""
+      required: false
+      value: DEV_CLIENT_ID
+    - name: DEV_CLIENT_SECRET
+      type: Secret
+      description: ""
+      required: false
+      value: DEV_CLIENT_SECRET

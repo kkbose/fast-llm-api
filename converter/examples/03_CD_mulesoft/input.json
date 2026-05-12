@@ -1,0 +1,59 @@
+{
+  "name": "my-mulesoft-api-dev",
+  "path": "\\Projects\\DEV",
+  "environments": [
+    {
+      "id": 1,
+      "name": "Dev",
+      "deployPhases": [
+        {
+          "deploymentInput": { "parallelExecution": { "parallelExecutionType": "none" } },
+          "workflowTasks": [
+            {
+              "name": "Download Artifacts",
+              "taskId": "<uuid-1>",
+              "enabled": true,
+              "inputs": {
+                "script": "echo 'Downloading build artifacts from artifact store'"
+              }
+            },
+            {
+              "name": "Deploy to CloudHub",
+              "taskId": "<uuid-2>",
+              "enabled": true,
+              "inputs": {
+                "targetType": "inline",
+                "script": "npm install -g anypoint-cli@latest\nresponse=$(curl -s -H 'Content-Type: application/json' -X POST -d '{\"client_id\":\"'$DEV_CLIENT_ID'\",\"client_secret\":\"'$DEV_CLIENT_SECRET'\",\"grant_type\":\"client_credentials\"}' https://anypoint.mulesoft.com/accounts/api/v2/oauth2/token)\nbearer_token=$(echo $response | jq -r '.access_token')\nif anypoint-cli runtime-mgr cloudhub-application describe --bearer \"$bearer_token\" \"$DEV_APP_NAME\"; then\n  anypoint-cli runtime-mgr cloudhub-application modify --bearer \"$bearer_token\" --runtime \"$DEV_RUNTIME\" --workers \"$DEV_WORKERS\" --workerSize \"$DEV_WORKER_SIZE\" --region \"$DEV_REGION\" \"$DEV_APP_NAME\" \"$ARTIFACT_PATH\"\nelse\n  anypoint-cli runtime-mgr cloudhub-application deploy --bearer \"$bearer_token\" --runtime \"$DEV_RUNTIME\" --workers \"$DEV_WORKERS\" --workerSize \"$DEV_WORKER_SIZE\" --region \"$DEV_REGION\" \"$DEV_APP_NAME\" \"$ARTIFACT_PATH\"\nfi"
+              }
+            }
+          ]
+        }
+      ],
+      "variables": {
+        "DEV_APP_NAME": { "value": "my-mulesoft-api" },
+        "DEV_RUNTIME": { "value": "4.6.0" },
+        "DEV_WORKERS": { "value": "1" },
+        "DEV_WORKER_SIZE": { "value": "MICRO" },
+        "DEV_REGION": { "value": "us-east-1" },
+        "DEV_CLIENT_ID": { "isSecret": true, "value": "<masked>" },
+        "DEV_CLIENT_SECRET": { "isSecret": true, "value": "<masked>" }
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "sourceId": "<uuid-3>",
+      "type": "Build",
+      "alias": "_my-mulesoft-api-dev",
+      "definitionReference": {
+        "definition": { "id": "100", "name": "my-mulesoft-api-dev" },
+        "project": { "id": "<uuid-4>", "name": "Mulesoft" }
+      },
+      "isPrimary": true
+    }
+  ],
+  "triggers": [
+    { "artifactAlias": "_my-mulesoft-api-dev", "triggerType": 1 }
+  ],
+  "releaseNameFormat": "Release-$(rev:r)"
+}
